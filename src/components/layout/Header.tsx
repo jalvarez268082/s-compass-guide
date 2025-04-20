@@ -1,46 +1,69 @@
-
 import React from 'react';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import { useStore } from '@/store/useStore';
+import { Link, useNavigate } from 'react-router-dom';
+import { UserCircle, LogOut } from 'lucide-react';
 
 interface HeaderProps {
   title?: string;
 }
 
 const Header: React.FC<HeaderProps> = ({ title = "Bereavement Compass" }) => {
-  const { currentUser, toggleAdminEditMode, isAdminEditMode } = useStore();
+  const { currentUser, signOut, isAuthenticated } = useStore();
+  const navigate = useNavigate();
+  
+  const handleSignOut = async () => {
+    const success = await signOut();
+    if (success) {
+      navigate('/auth');
+    }
+  };
   
   return (
     <header className="bg-primary text-white py-4 px-6 shadow-md">
       <div className="container mx-auto flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{title}</h1>
+        <Link to="/" className="text-white hover:text-white/90">
+          <h1 className="text-2xl font-bold">{title}</h1>
+        </Link>
         
         <div className="flex items-center gap-4">
-          {currentUser?.role === 'admin' && (
-            <div className="flex items-center space-x-2">
-              <Switch
-                id="admin-mode"
-                checked={isAdminEditMode}
-                onCheckedChange={toggleAdminEditMode}
-              />
-              <Label htmlFor="admin-mode" className="text-white">
-                Admin Mode
-              </Label>
+          {currentUser && (
+            <div className="flex items-center text-sm mr-2">
+              <UserCircle className="mr-1 h-4 w-4" />
+              <span>
+                {currentUser.email}
+                {currentUser.role === 'admin' && (
+                  <span className="ml-1 text-xs bg-white/20 px-1.5 py-0.5 rounded-full">
+                    Admin
+                  </span>
+                )}
+              </span>
             </div>
           )}
           
           <div className="flex gap-2">
-            {!currentUser ? (
+            {!isAuthenticated ? (
               <>
-                <Button variant="secondary" size="sm">Sign In</Button>
-                <Button variant="outline" size="sm" className="bg-white text-primary hover:bg-gray-100">
-                  Sign Up
+                <Button variant="secondary" size="sm" asChild>
+                  <Link to="/auth">Sign In</Link>
+                </Button>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="bg-white text-primary hover:bg-gray-100"
+                  asChild
+                >
+                  <Link to="/auth?tab=signup">Sign Up</Link>
                 </Button>
               </>
             ) : (
-              <Button variant="outline" size="sm" className="bg-white text-primary hover:bg-gray-100">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="bg-white text-primary hover:bg-gray-100"
+                onClick={handleSignOut}
+              >
+                <LogOut className="mr-1 h-4 w-4" />
                 Sign Out
               </Button>
             )}

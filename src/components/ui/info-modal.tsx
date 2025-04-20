@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Task } from '@/types';
 
 interface InfoModalProps {
@@ -16,13 +15,15 @@ const InfoModal: React.FC<InfoModalProps> = ({ task, isOpen, onClose }) => {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-xl font-semibold">{task.title}</DialogTitle>
-          <DialogDescription className="text-md font-medium text-primary mt-2">
+          <DialogTitle className="text-xl font-semibold">
             {task.content.subheader}
-          </DialogDescription>
+          </DialogTitle>
         </DialogHeader>
         <div className="mt-4 text-left">
-          <div className="whitespace-pre-wrap">{task.content.content}</div>
+          <div 
+            className="prose prose-sm max-w-none"
+            dangerouslySetInnerHTML={{ __html: task.content.content }}
+          />
         </div>
       </DialogContent>
     </Dialog>

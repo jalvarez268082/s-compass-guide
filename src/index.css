@@ -99,3 +99,8 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Add this to ensure TipTap text color styling works properly with prose */
+.prose [style*="color"] {
+  color: inherit;
+}

@@ -1,6 +1,7 @@
-
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Task, Dropdown, Checklist, User } from '../types';
+import * as api from '@/integrations/supabase/api';
+import * as auth from '@/integrations/supabase/auth';
 
 interface StoreContextType {
   currentUser: User | null;
@@ -8,464 +9,488 @@ interface StoreContextType {
   selectedTask: Task | null;
   isInfoModalOpen: boolean;
   isAdminEditMode: boolean;
+  isLoading: boolean;
+  error: string | null;
+  authError: string | null;
+  isAuthenticated: boolean;
+  
+  // User auth methods
+  signIn: (email: string, password: string) => Promise<boolean>;
+  signUp: (email: string, password: string, isAdmin: boolean) => Promise<boolean>;
+  signOut: () => Promise<boolean>;
+  resetPassword: (email: string) => Promise<boolean>;
   
   setCurrentUser: (user: User | null) => void;
   setChecklists: (checklists: Checklist[]) => void;
-  addChecklist: (checklist: Checklist) => void;
-  updateChecklist: (checklist: Checklist) => void;
-  deleteChecklist: (checklistId: string) => void;
-  toggleDropdown: (checklistId: string, dropdownId: string) => void;
-  addDropdown: (checklistId: string, dropdown: Dropdown, parentDropdownId?: string) => void;
-  updateDropdown: (checklistId: string, dropdown: Dropdown, parentDropdownId?: string) => void;
-  deleteDropdown: (checklistId: string, dropdownId: string, parentDropdownId?: string) => void;
-  toggleTaskCompletion: (checklistId: string, dropdownId: string, taskId: string) => void;
-  addTask: (checklistId: string, dropdownId: string, task: Task, parentDropdownId?: string) => void;
-  updateTask: (checklistId: string, dropdownId: string, task: Task, parentDropdownId?: string) => void;
-  deleteTask: (checklistId: string, dropdownId: string, taskId: string, parentDropdownId?: string) => void;
+  addChecklist: (checklist: Omit<Checklist, 'id'>) => Promise<void>;
+  updateChecklist: (checklist: Checklist) => Promise<void>;
+  deleteChecklist: (checklistId: string) => Promise<void>;
+  toggleDropdown: (checklistId: string, dropdownId: string) => Promise<void>;
+  addDropdown: (checklistId: string, dropdown: Omit<Dropdown, 'id'>, parentDropdownId?: string) => Promise<void>;
+  updateDropdown: (checklistId: string, dropdown: Dropdown, parentDropdownId?: string) => Promise<void>;
+  deleteDropdown: (checklistId: string, dropdownId: string, parentDropdownId?: string) => Promise<void>;
+  toggleTaskCompletion: (checklistId: string, dropdownId: string, taskId: string) => Promise<void>;
+  addTask: (checklistId: string, dropdownId: string, task: Omit<Task, 'id'>, parentDropdownId?: string) => Promise<void>;
+  updateTask: (checklistId: string, dropdownId: string, task: Task, parentDropdownId?: string) => Promise<void>;
+  deleteTask: (checklistId: string, dropdownId: string, taskId: string, parentDropdownId?: string) => Promise<void>;
   openInfoModal: (task: Task) => void;
   closeInfoModal: () => void;
-  toggleAdminEditMode: () => void;
+  refreshData: () => Promise<void>;
 }
-
-// Create mock data for initial state
-const mockData: Checklist[] = [
-  {
-    id: '1',
-    title: 'Bereavement Checklist',
-    dropdowns: [
-      {
-        id: '1-1',
-        title: 'Immediate Steps',
-        expanded: false,
-        tasks: [
-          {
-            id: '1-1-1',
-            title: 'Notify close family and friends',
-            completed: false,
-            content: {
-              subheader: 'How to notify loved ones',
-              content: 'Consider making a list of people to contact. Ask a friend or family member to help make calls. For distant friends or colleagues, an email might be appropriate.'
-            }
-          },
-          {
-            id: '1-1-2',
-            title: 'Contact funeral home',
-            completed: false,
-            content: {
-              subheader: 'Selecting a funeral home',
-              content: 'Research funeral homes in your area. Ask about their services and pricing. Consider if your loved one had any pre-arrangements.'
-            }
-          }
-        ]
-      },
-      {
-        id: '1-2',
-        title: 'Documentation',
-        expanded: false,
-        tasks: [
-          {
-            id: '1-2-1',
-            title: 'Obtain death certificates',
-            completed: false,
-            content: {
-              subheader: 'Death certificates',
-              content: 'Order multiple certified copies (typically 10-15). You\'ll need these for banks, insurance companies, and government agencies.'
-            }
-          },
-          {
-            id: '1-2-2',
-            title: 'Locate important documents',
-            completed: false,
-            content: {
-              subheader: 'Important documents to locate',
-              content: 'Look for: will, trust documents, insurance policies, bank statements, property deeds, vehicle titles, and tax returns.'
-            }
-          }
-        ],
-        dropdowns: [
-          {
-            id: '1-2-3',
-            title: 'Legal Documents',
-            expanded: false,
-            tasks: [
-              {
-                id: '1-2-3-1',
-                title: 'Find the will',
-                completed: false,
-                content: {
-                  subheader: 'Locating the will',
-                  content: 'Check safe deposit boxes, home offices, and with the deceased\'s attorney. If no will exists, consult with a probate attorney about next steps.'
-                }
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  }
-];
 
 const StoreContext = createContext<StoreContextType | null>(null);
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // State
-  const [currentUser, setCurrentUser] = useState<User | null>({ 
-    id: '1', 
-    email: 'admin@example.com', 
-    role: 'admin' 
-  });
-  const [checklists, setChecklists] = useState<Checklist[]>(mockData);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isInfoModalOpen, setIsInfoModalOpen] = useState<boolean>(false);
   const [isAdminEditMode, setIsAdminEditMode] = useState<boolean>(false);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
-  // Helper function to find and update nested dropdowns
-  const updateNestedDropdown = (dropdowns: Dropdown[], targetId: string, updater: (dropdown: Dropdown) => Dropdown): Dropdown[] => {
-    return dropdowns.map(dropdown => {
-      if (dropdown.id === targetId) {
-        return updater(dropdown);
-      }
+  // Helper function to find dropdown by id (either at top level or nested)
+  const findDropdown = (dropdowns: Dropdown[], id: string): Dropdown | null => {
+    for (const dropdown of dropdowns) {
+      if (dropdown.id === id) return dropdown;
       if (dropdown.dropdowns) {
-        return {
-          ...dropdown,
-          dropdowns: updateNestedDropdown(dropdown.dropdowns, targetId, updater)
-        };
+        const nestedResult = findDropdown(dropdown.dropdowns, id);
+        if (nestedResult) return nestedResult;
       }
-      return dropdown;
-    });
+    }
+    return null;
   };
+
+  // Helper function to get a checklist by id
+  const getChecklist = (id: string): Checklist | null => {
+    return checklists.find(c => c.id === id) || null;
+  };
+
+  // Authentication methods
+  const signIn = async (email: string, password: string): Promise<boolean> => {
+    setAuthError(null);
+    setIsLoading(true);
+    
+    try {
+      const { user, error: signInError } = await auth.signIn(email, password);
+      
+      if (signInError) {
+        setAuthError(signInError);
+        return false;
+      }
+      
+      if (user) {
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+        // If user is admin, automatically enable admin mode
+        if (user.role === 'admin') {
+          setIsAdminEditMode(true);
+        }
+        return true;
+      }
+      
+      return false;
+    } catch (err) {
+      console.error(err);
+      setAuthError('An unexpected error occurred');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const signUp = async (email: string, password: string, isAdmin: boolean): Promise<boolean> => {
+    setAuthError(null);
+    setIsLoading(true);
+    
+    try {
+      const { user, error: signUpError } = await auth.signUp(email, password, isAdmin);
+      
+      if (signUpError) {
+        setAuthError(signUpError);
+        return false;
+      }
+      
+      if (user) {
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+        // If user is admin, automatically enable admin mode
+        if (user.role === 'admin') {
+          setIsAdminEditMode(true);
+        }
+        return true;
+      }
+      
+      return false;
+    } catch (err) {
+      console.error(err);
+      setAuthError('An unexpected error occurred');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const signOutUser = async (): Promise<boolean> => {
+    setAuthError(null);
+    setIsLoading(true);
+    
+    try {
+      const { error: signOutError } = await auth.signOut();
+      
+      if (signOutError) {
+        setAuthError(signOutError);
+        return false;
+      }
+      
+      setCurrentUser(null);
+      setIsAuthenticated(false);
+      setIsAdminEditMode(false);
+      return true;
+    } catch (err) {
+      console.error(err);
+      setAuthError('An unexpected error occurred');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const resetPassword = async (email: string): Promise<boolean> => {
+    setAuthError(null);
+    setIsLoading(true);
+    
+    try {
+      const { success, error: resetError } = await auth.resetPassword(email);
+      
+      if (resetError) {
+        setAuthError(resetError);
+        return false;
+      }
+      
+      return success;
+    } catch (err) {
+      console.error(err);
+      setAuthError('An unexpected error occurred');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load initial data
+  const loadInitialData = async () => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      // Get current user from auth
+      const { user, error: userError } = await auth.getCurrentUser();
+      
+      if (userError) {
+        console.error('Error getting current user:', userError);
+      }
+      
+      if (user) {
+        setCurrentUser(user);
+        setIsAuthenticated(true);
+        // If user is admin, automatically enable admin mode
+        if (user.role === 'admin') {
+          setIsAdminEditMode(true);
+        }
+        
+        // Get checklists
+        const checklistsData = await api.getChecklists();
+        setChecklists(checklistsData);
+      } else {
+        // Not authenticated, clear data
+        setChecklists([]);
+      }
+    } catch (err) {
+      setError('Failed to load data');
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Reload data
+  const refreshData = async () => {
+    try {
+      setIsLoading(true);
+      if (isAuthenticated) {
+        const checklistsData = await api.getChecklists();
+        setChecklists(checklistsData);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load data on initial mount
+  useEffect(() => {
+    loadInitialData();
+  }, []);
 
   // Actions
-  const addChecklist = (checklist: Checklist) => {
-    setChecklists(prev => [...prev, checklist]);
+  const addChecklist = async (checklist: Omit<Checklist, 'id'>) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const newChecklist = await api.createChecklist(checklist);
+      if (newChecklist) {
+        setChecklists(prev => [...prev, newChecklist]);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const updateChecklist = (checklist: Checklist) => {
-    setChecklists(prev => prev.map(c => c.id === checklist.id ? checklist : c));
+  const updateChecklist = async (checklist: Checklist) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const updatedChecklist = await api.updateChecklist(checklist);
+      if (updatedChecklist) {
+        setChecklists(prev => prev.map(c => c.id === updatedChecklist.id ? updatedChecklist : c));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const deleteChecklist = (checklistId: string) => {
-    setChecklists(prev => prev.filter(c => c.id !== checklistId));
+  const deleteChecklist = async (checklistId: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const success = await api.deleteChecklist(checklistId);
+      if (success) {
+        setChecklists(prev => prev.filter(c => c.id !== checklistId));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const toggleDropdown = (checklistId: string, dropdownId: string) => {
+  const toggleDropdown = async (checklistId: string, dropdownId: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      // Find the checklist
+      const checklist = getChecklist(checklistId);
+      if (!checklist) return;
+      
+      // Find the dropdown
+      const dropdown = findDropdown(checklist.dropdowns, dropdownId);
+      if (!dropdown) return;
+      
+      // Toggle expanded state in DB
+      const success = await api.toggleDropdownExpanded(dropdownId, !dropdown.expanded);
+      
+      if (success) {
+        // Update local state
     setChecklists(prev => 
-      prev.map(checklist => {
-        if (checklist.id === checklistId) {
-          const updatedDropdowns = checklist.dropdowns.map(dropdown => {
-            if (dropdown.id === dropdownId) {
-              return { ...dropdown, expanded: !dropdown.expanded };
-            }
-            if (dropdown.dropdowns) {
-              return {
-                ...dropdown,
-                dropdowns: updateNestedDropdown(dropdown.dropdowns, dropdownId, d => ({
-                  ...d,
-                  expanded: !d.expanded
-                }))
-              };
-            }
-            return dropdown;
-          });
-          
-          return { ...checklist, dropdowns: updatedDropdowns };
-        }
-        return checklist;
-      })
-    );
-  };
-
-  const addDropdown = (checklistId: string, dropdown: Dropdown, parentDropdownId?: string) => {
-    setChecklists(prev => 
-      prev.map(checklist => {
-        if (checklist.id === checklistId) {
-          if (!parentDropdownId) {
-            return { ...checklist, dropdowns: [...checklist.dropdowns, dropdown] };
-          } else {
-            const updatedDropdowns = checklist.dropdowns.map(d => {
-              if (d.id === parentDropdownId) {
-                return { 
-                  ...d, 
-                  dropdowns: d.dropdowns ? [...d.dropdowns, dropdown] : [dropdown] 
-                };
-              }
-              if (d.dropdowns) {
-                return {
-                  ...d,
-                  dropdowns: updateNestedDropdown(d.dropdowns, parentDropdownId, parent => ({
-                    ...parent,
-                    dropdowns: parent.dropdowns ? [...parent.dropdowns, dropdown] : [dropdown]
-                  }))
-                };
-              }
-              return d;
-            });
+          prev.map(c => {
+            if (c.id !== checklistId) return c;
             
-            return { ...checklist, dropdowns: updatedDropdowns };
-          }
-        }
-        return checklist;
-      })
-    );
-  };
-
-  const updateDropdown = (checklistId: string, dropdown: Dropdown, parentDropdownId?: string) => {
-    setChecklists(prev => 
-      prev.map(checklist => {
-        if (checklist.id === checklistId) {
-          if (!parentDropdownId) {
-            return { 
-              ...checklist, 
-              dropdowns: checklist.dropdowns.map(d => d.id === dropdown.id ? dropdown : d) 
+            // Update dropdowns
+            const updateNestedDropdown = (dropdowns: Dropdown[]): Dropdown[] => {
+              return dropdowns.map(d => {
+                if (d.id === dropdownId) {
+                  return { ...d, expanded: !d.expanded };
+                }
+                
+                if (d.dropdowns) {
+                  return { ...d, dropdowns: updateNestedDropdown(d.dropdowns) };
+                }
+                
+                return d;
+              });
             };
-          } else {
-            const updatedDropdowns = checklist.dropdowns.map(d => {
-              if (d.id === parentDropdownId) {
-                return { 
-                  ...d, 
-                  dropdowns: d.dropdowns?.map(nd => nd.id === dropdown.id ? dropdown : nd) 
-                };
-              }
-              if (d.dropdowns) {
-                return {
-                  ...d,
-                  dropdowns: updateNestedDropdown(d.dropdowns, parentDropdownId, parent => ({
-                    ...parent,
-                    dropdowns: parent.dropdowns?.map(nd => nd.id === dropdown.id ? dropdown : nd)
-                  }))
-                };
-              }
-              return d;
-            });
             
-            return { ...checklist, dropdowns: updatedDropdowns };
-          }
-        }
-        return checklist;
-      })
-    );
+            return { ...c, dropdowns: updateNestedDropdown(c.dropdowns) };
+          })
+        );
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const deleteDropdown = (checklistId: string, dropdownId: string, parentDropdownId?: string) => {
+  const addDropdown = async (checklistId: string, dropdown: Omit<Dropdown, 'id'>, parentDropdownId?: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const newDropdown = await api.createDropdown(checklistId, dropdown, parentDropdownId);
+      
+      if (newDropdown) {
+        // Refresh data to get updated structure
+        await refreshData();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const updateDropdown = async (checklistId: string, dropdown: Dropdown, parentDropdownId?: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const updatedDropdown = await api.updateDropdown(dropdown);
+      
+      if (updatedDropdown) {
+        // Refresh data to get updated structure
+        await refreshData();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const deleteDropdown = async (checklistId: string, dropdownId: string, parentDropdownId?: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const success = await api.deleteDropdown(dropdownId);
+      
+      if (success) {
+        // Refresh data to get updated structure
+        await refreshData();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const toggleTaskCompletion = async (checklistId: string, dropdownId: string, taskId: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      // Find the checklist
+      const checklist = getChecklist(checklistId);
+      if (!checklist) return;
+      
+      // Find the dropdown
+      const dropdown = findDropdown(checklist.dropdowns, dropdownId);
+      if (!dropdown) return;
+      
+      // Find the task
+      const task = dropdown.tasks.find(t => t.id === taskId);
+      if (!task) return;
+      
+      // Toggle completion state in DB
+      const success = await api.toggleTaskCompletion(taskId, !task.completed);
+      
+      if (success) {
+        // Update local state
     setChecklists(prev => 
-      prev.map(checklist => {
-        if (checklist.id === checklistId) {
-          if (!parentDropdownId) {
-            return { 
-              ...checklist, 
-              dropdowns: checklist.dropdowns.filter(d => d.id !== dropdownId) 
-            };
-          } else {
-            const updatedDropdowns = checklist.dropdowns.map(d => {
-              if (d.id === parentDropdownId) {
-                return { 
-                  ...d, 
-                  dropdowns: d.dropdowns?.filter(nd => nd.id !== dropdownId) 
-                };
-              }
-              if (d.dropdowns) {
-                return {
-                  ...d,
-                  dropdowns: updateNestedDropdown(d.dropdowns, parentDropdownId, parent => ({
-                    ...parent,
-                    dropdowns: parent.dropdowns?.filter(nd => nd.id !== dropdownId)
-                  }))
-                };
-              }
-              return d;
-            });
+          prev.map(c => {
+            if (c.id !== checklistId) return c;
             
-            return { ...checklist, dropdowns: updatedDropdowns };
-          }
-        }
-        return checklist;
-      })
-    );
+            // Update dropdowns
+            const updateNestedDropdownTasks = (dropdowns: Dropdown[]): Dropdown[] => {
+              return dropdowns.map(d => {
+                if (d.id === dropdownId) {
+            return {
+                    ...d, 
+                    tasks: d.tasks.map(t => 
+                      t.id === taskId ? { ...t, completed: !t.completed } : t
+                    ) 
+                  };
+                }
+                
+                if (d.dropdowns) {
+                  return { ...d, dropdowns: updateNestedDropdownTasks(d.dropdowns) };
+                }
+                
+                return d;
+              });
+            };
+            
+            return { ...c, dropdowns: updateNestedDropdownTasks(c.dropdowns) };
+          })
+        );
+      }
+    } catch (err) {
+      console.error(err);
+    }
   };
 
-  const toggleTaskCompletion = (checklistId: string, dropdownId: string, taskId: string) => {
-    setChecklists(prev => 
-      prev.map(checklist => {
-        if (checklist.id === checklistId) {
-          // Check top-level dropdowns first
-          const dropdownWithTask = checklist.dropdowns.find(d => d.id === dropdownId);
-          if (dropdownWithTask) {
-            return {
-              ...checklist,
-              dropdowns: checklist.dropdowns.map(dropdown => {
-                if (dropdown.id === dropdownId) {
-                  return {
-                    ...dropdown,
-                    tasks: dropdown.tasks.map(task => {
-                      if (task.id === taskId) {
-                        return { ...task, completed: !task.completed };
-                      }
-                      return task;
-                    })
-                  };
-                }
-                return dropdown;
-              })
-            };
-          }
-          
-          // Check nested dropdowns
-          return {
-            ...checklist,
-            dropdowns: checklist.dropdowns.map(dropdown => {
-              if (dropdown.dropdowns) {
-                return {
-                  ...dropdown,
-                  dropdowns: updateNestedDropdown(dropdown.dropdowns, dropdownId, d => ({
-                    ...d,
-                    tasks: d.tasks.map(task => {
-                      if (task.id === taskId) {
-                        return { ...task, completed: !task.completed };
-                      }
-                      return task;
-                    })
-                  }))
-                };
-              }
-              return dropdown;
-            })
-          };
-        }
-        return checklist;
-      })
-    );
+  const addTask = async (checklistId: string, dropdownId: string, task: Omit<Task, 'id'>, parentDropdownId?: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const newTask = await api.createTask(dropdownId, task);
+      
+      if (newTask) {
+        // Refresh data to get updated structure
+        await refreshData();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const addTask = (checklistId: string, dropdownId: string, task: Task, parentDropdownId?: string) => {
-    setChecklists(prev => 
-      prev.map(checklist => {
-        if (checklist.id === checklistId) {
-          if (!parentDropdownId) {
-            return {
-              ...checklist,
-              dropdowns: checklist.dropdowns.map(dropdown => {
-                if (dropdown.id === dropdownId) {
-                  return { ...dropdown, tasks: [...dropdown.tasks, task] };
-                }
-                return dropdown;
-              })
-            };
-          } else {
-            return {
-              ...checklist,
-              dropdowns: checklist.dropdowns.map(dropdown => {
-                if (dropdown.id === parentDropdownId && dropdown.dropdowns) {
-                  return {
-                    ...dropdown,
-                    dropdowns: dropdown.dropdowns.map(nestedDropdown => {
-                      if (nestedDropdown.id === dropdownId) {
-                        return {
-                          ...nestedDropdown,
-                          tasks: [...nestedDropdown.tasks, task]
-                        };
-                      }
-                      return nestedDropdown;
-                    })
-                  };
-                }
-                return dropdown;
-              })
-            };
-          }
-        }
-        return checklist;
-      })
-    );
+  const updateTask = async (checklistId: string, dropdownId: string, task: Task, parentDropdownId?: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const updatedTask = await api.updateTask(task);
+      
+      if (updatedTask) {
+        // Refresh data to get updated structure
+        await refreshData();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const updateTask = (checklistId: string, dropdownId: string, task: Task, parentDropdownId?: string) => {
-    setChecklists(prev => 
-      prev.map(checklist => {
-        if (checklist.id === checklistId) {
-          if (!parentDropdownId) {
-            return {
-              ...checklist,
-              dropdowns: checklist.dropdowns.map(dropdown => {
-                if (dropdown.id === dropdownId) {
-                  return {
-                    ...dropdown,
-                    tasks: dropdown.tasks.map(t => t.id === task.id ? task : t)
-                  };
-                }
-                return dropdown;
-              })
-            };
-          } else {
-            return {
-              ...checklist,
-              dropdowns: checklist.dropdowns.map(dropdown => {
-                if (dropdown.id === parentDropdownId && dropdown.dropdowns) {
-                  return {
-                    ...dropdown,
-                    dropdowns: dropdown.dropdowns.map(nestedDropdown => {
-                      if (nestedDropdown.id === dropdownId) {
-                        return {
-                          ...nestedDropdown,
-                          tasks: nestedDropdown.tasks.map(t => t.id === task.id ? task : t)
-                        };
-                      }
-                      return nestedDropdown;
-                    })
-                  };
-                }
-                return dropdown;
-              })
-            };
-          }
-        }
-        return checklist;
-      })
-    );
-  };
-
-  const deleteTask = (checklistId: string, dropdownId: string, taskId: string, parentDropdownId?: string) => {
-    setChecklists(prev => 
-      prev.map(checklist => {
-        if (checklist.id === checklistId) {
-          if (!parentDropdownId) {
-            return {
-              ...checklist,
-              dropdowns: checklist.dropdowns.map(dropdown => {
-                if (dropdown.id === dropdownId) {
-                  return {
-                    ...dropdown,
-                    tasks: dropdown.tasks.filter(t => t.id !== taskId)
-                  };
-                }
-                return dropdown;
-              })
-            };
-          } else {
-            return {
-              ...checklist,
-              dropdowns: checklist.dropdowns.map(dropdown => {
-                if (dropdown.id === parentDropdownId && dropdown.dropdowns) {
-                  return {
-                    ...dropdown,
-                    dropdowns: dropdown.dropdowns.map(nestedDropdown => {
-                      if (nestedDropdown.id === dropdownId) {
-                        return {
-                          ...nestedDropdown,
-                          tasks: nestedDropdown.tasks.filter(t => t.id !== taskId)
-                        };
-                      }
-                      return nestedDropdown;
-                    })
-                  };
-                }
-                return dropdown;
-              })
-            };
-          }
-        }
-        return checklist;
-      })
-    );
+  const deleteTask = async (checklistId: string, dropdownId: string, taskId: string, parentDropdownId?: string) => {
+    if (!isAuthenticated) return;
+    
+    try {
+      setIsLoading(true);
+      const success = await api.deleteTask(taskId);
+      
+      if (success) {
+        // Refresh data to get updated structure
+        await refreshData();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const openInfoModal = (task: Task) => {
@@ -478,17 +503,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setSelectedTask(null);
   };
 
-  const toggleAdminEditMode = () => {
-    setIsAdminEditMode(prev => !prev);
-  };
-
-  const contextValue = {
+  return (
+    <StoreContext.Provider
+      value={{
     currentUser,
     checklists,
     selectedTask,
     isInfoModalOpen,
     isAdminEditMode,
-    
+        isLoading,
+        error,
+        authError,
+        isAuthenticated,
+        signIn,
+        signUp,
+        signOut: signOutUser,
+        resetPassword,
     setCurrentUser,
     setChecklists,
     addChecklist,
@@ -504,11 +534,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     deleteTask,
     openInfoModal,
     closeInfoModal,
-    toggleAdminEditMode
-  };
-
-  return (
-    <StoreContext.Provider value={contextValue}>
+        refreshData
+      }}
+    >
       {children}
     </StoreContext.Provider>
   );
@@ -517,7 +545,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 export const useStore = () => {
   const context = useContext(StoreContext);
   if (!context) {
-    throw new Error("useStore must be used within a StoreProvider");
+    throw new Error('useStore must be used within a StoreProvider');
   }
   return context;
 };

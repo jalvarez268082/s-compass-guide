@@ -9,7 +9,142 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      users: {
+        Row: {
+          id: string
+          email: string
+          role: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          email: string
+          role: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          email?: string
+          role?: string
+          created_at?: string
+        }
+      }
+      checklists: {
+        Row: {
+          id: string
+          title: string
+          user_id: string
+          created_at: string
+          updated_at: string
+          is_global: boolean
+        }
+        Insert: {
+          id?: string
+          title: string
+          user_id: string
+          created_at?: string
+          updated_at?: string
+          is_global?: boolean
+        }
+        Update: {
+          id?: string
+          title?: string
+          user_id?: string
+          created_at?: string
+          updated_at?: string
+          is_global?: boolean
+        }
+      }
+      dropdowns: {
+        Row: {
+          id: string
+          title: string
+          checklist_id: string
+          parent_dropdown_id: string | null
+          expanded: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          title: string
+          checklist_id: string
+          parent_dropdown_id?: string | null
+          expanded?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          title?: string
+          checklist_id?: string
+          parent_dropdown_id?: string | null
+          expanded?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      tasks: {
+        Row: {
+          id: string
+          title: string
+          completed: boolean
+          content_subheader: string
+          content_text: string
+          dropdown_id: string
+          created_at: string
+          updated_at: string
+          default_completed: boolean
+        }
+        Insert: {
+          id?: string
+          title: string
+          completed?: boolean
+          content_subheader: string
+          content_text: string
+          dropdown_id: string
+          created_at?: string
+          updated_at?: string
+          default_completed?: boolean
+        }
+        Update: {
+          id?: string
+          title?: string
+          completed?: boolean
+          content_subheader?: string
+          content_text?: string
+          dropdown_id?: string
+          created_at?: string
+          updated_at?: string
+          default_completed?: boolean
+        }
+      }
+      user_task_completions: {
+        Row: {
+          id: string
+          user_id: string
+          task_id: string
+          completed: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          task_id: string
+          completed: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          task_id?: string
+          completed?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+      }
     }
     Views: {
       [_ in never]: never

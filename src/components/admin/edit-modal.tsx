@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   Dialog, 
@@ -21,6 +20,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useStore } from '@/store/useStore';
 import { Task, Dropdown, Checklist } from '@/types';
+import RichTextEditor from '@/components/ui/rich-text-editor';
 
 interface EditModalProps {
   isOpen: boolean;
@@ -114,27 +114,38 @@ const EditModal: React.FC<EditModalProps> = ({
             const parentOfNested = checklist.dropdowns.find(d => d.id === grandparentId);
             if (parentOfNested) {
               setSelectedParentDropdown(grandparentId);
-              const dropdown = parentOfNested.dropdowns?.find(d => d.id === selectedDropdown);
-              if (dropdown) {
-                setSelectedDropdown(dropdown.id);
+              
+              // Find the dropdown that contains the task
+              const nestedDropdown = parentOfNested.dropdowns?.find(d => d.id === selectedDropdown);
+              
+              // First set the dropdown ID before looking for the task
+              if (nestedDropdown) {
+                setSelectedDropdown(nestedDropdown.id);
+              }
+              
+              // Now find the task in all nested dropdowns to prevent issues with state updates
+              for (const dropdown of parentOfNested.dropdowns || []) {
                 const task = dropdown.tasks.find(t => t.id === itemId);
                 if (task) {
+                  setSelectedDropdown(dropdown.id);
                   setTitle(task.title);
                   setSubheader(task.content.subheader);
                   setContent(task.content.content);
+                  break;
                 }
               }
             }
           } else {
             // Task in top-level dropdown
-            const dropdown = checklist.dropdowns.find(d => d.id === selectedDropdown);
-            if (dropdown) {
-              setSelectedDropdown(dropdown.id);
+            // Find the dropdown that contains the task
+            for (const dropdown of checklist.dropdowns) {
               const task = dropdown.tasks.find(t => t.id === itemId);
               if (task) {
+                setSelectedDropdown(dropdown.id);
                 setTitle(task.title);
                 setSubheader(task.content.subheader);
                 setContent(task.content.content);
+                break;
               }
             }
           }
@@ -168,7 +179,6 @@ const EditModal: React.FC<EditModalProps> = ({
       } else {
         // Create new checklist
         addChecklist({
-          id: Date.now().toString(),
           title,
           dropdowns: []
         });
@@ -391,14 +401,12 @@ const EditModal: React.FC<EditModalProps> = ({
                 <Label htmlFor="content" className="text-right align-top mt-2">
                   Content
                 </Label>
-                <Textarea
-                  id="content"
-                  className="col-span-3"
-                  placeholder="Enter task content details"
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  rows={5}
-                />
+                <div className="col-span-3">
+                  <RichTextEditor
+                    value={content}
+                    onChange={setContent}
+                  />
+                </div>
               </div>
             </>
           )}
