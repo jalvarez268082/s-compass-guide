@@ -1,26 +1,61 @@
 import { supabase } from './client';
-import { Checklist, Dropdown, Task, User } from '@/types';
+import { Checklist, Dropdown, Task, User, LearningPage } from '@/types';
 import { v4 as uuidv4 } from 'uuid';
+
+// Add this function at the beginning of the file after imports
+export async function hasValidSession(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    return !error && data.session !== null;
+  } catch (err) {
+    console.error('Error checking session:', err);
+    return false;
+  }
+}
 
 // User functions
 export async function getCurrentUser(): Promise<User | null> {
-  const { data: session } = await supabase.auth.getSession();
-  
-  if (!session.session) return null;
-  
-  const { data, error } = await supabase
-    .from('users')
-    .select('*')
-    .eq('id', session.session.user.id)
-    .single();
-  
-  if (error || !data) return null;
-  
-  return {
-    id: data.id,
-    email: data.email,
-    role: data.role as 'admin' | 'user'
-  };
+  try {
+    // Check if we have a valid session first
+    const hasSession = await hasValidSession();
+    if (!hasSession) {
+      console.log('No valid session found');
+      return null;
+    }
+    
+    // Get user from auth
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    
+    if (authError || !authData.user) {
+      console.error('Error getting current user:', authError ? authError.message : 'Auth session missing!');
+      return null;
+    }
+    
+    // Get user from database
+    const { data: userData } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authData.user.id)
+      .single();
+    
+    if (!userData) {
+      // Return basic user from auth data if database record doesn't exist
+      return {
+        id: authData.user.id,
+        email: authData.user.email || '',
+        role: 'user' // Default role
+      };
+    }
+    
+    return {
+      id: userData.id,
+      email: userData.email,
+      role: userData.role as 'admin' | 'user'
+    };
+  } catch (err) {
+    console.error('Error getting current user:', err);
+    return null;
+  }
 }
 
 // Checklist functions
@@ -60,67 +95,73 @@ export async function getChecklists(): Promise<Checklist[]> {
   return checklists;
 }
 
-async function getDropdownWithTasksAndNested(dropdownData: any): Promise<Dropdown | null> {
-  // Get tasks for this dropdown
-  const { data: tasksData, error: tasksError } = await supabase
+// First, I'll add a SupabaseDropdown type definition to fix the missing type error
+/**
+ * Database representation of a dropdown
+ */
+interface SupabaseDropdown {
+  id: string;
+  title: string;
+  expanded: boolean;
+  checklist_id: string;
+  parent_dropdown_id: string | null;
+  position: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export async function getDropdownWithTasksAndNested(dropdown: SupabaseDropdown): Promise<Dropdown> {
+  // Get tasks for dropdown
+  const { data: tasks } = await supabase
     .from('tasks')
     .select('*')
-    .eq('dropdown_id', dropdownData.id);
-  
-  if (tasksError) return null;
-  
-  const tasks: Task[] = [];
-  
-  // Get the current user
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) return null;
-  
-  // For each task, get the user-specific completion status
-  for (const taskData of tasksData || []) {
-    // Check if user has a completion record for this task
-    const { data: completionData, error: completionError } = await supabase
-      .from('user_task_completions')
-      .select('completed')
-      .eq('task_id', taskData.id)
-      .eq('user_id', userData.user.id)
-      .maybeSingle();
-    
-    // Use user-specific completion status if available, otherwise use the default
-    const isCompleted = completionData ? completionData.completed : taskData.default_completed;
-    
-    tasks.push({
-      id: taskData.id,
-      title: taskData.title,
-      completed: isCompleted,
-      content: {
-        subheader: taskData.content_subheader,
-        content: taskData.content_text
-      }
-    });
-  }
-  
+    .eq('dropdown_id', dropdown.id);
+
   // Get nested dropdowns
-  const { data: nestedDropdownsData, error: nestedDropdownsError } = await supabase
+  const { data: nestedDropdowns } = await supabase
     .from('dropdowns')
     .select('*')
-    .eq('parent_dropdown_id', dropdownData.id);
-  
-  if (nestedDropdownsError) return null;
-  
-  const nestedDropdowns: Dropdown[] = [];
-  
-  for (const nestedDropdownData of nestedDropdownsData || []) {
-    const nestedDropdown = await getDropdownWithTasksAndNested(nestedDropdownData);
-    if (nestedDropdown) nestedDropdowns.push(nestedDropdown);
-  }
-  
+    .eq('parent_dropdown_id', dropdown.id);
+
+  // Get tasks and nested dropdowns for each nested dropdown
+  const nestedWithTasks = await Promise.all(
+    nestedDropdowns?.map((nestedDropdown) => getDropdownWithTasksAndNested(nestedDropdown)) || []
+  );
+
   return {
-    id: dropdownData.id,
-    title: dropdownData.title,
-    expanded: dropdownData.expanded,
-    tasks,
-    ...(nestedDropdowns.length > 0 ? { dropdowns: nestedDropdowns } : {})
+    id: dropdown.id,
+    title: dropdown.title,
+    tasks: tasks?.map((task) => ({
+      id: task.id,
+      title: task.title,
+      completed: task.completed,
+      // Add default content property to match Task interface
+      content: {
+        subheader: task.content_subheader || task.title || '',
+        content: task.content_text || ''
+      }
+    })) || [],
+    dropdowns: nestedWithTasks || [],
+    expanded: dropdown.expanded,
   };
+}
+
+export async function fetchDropdownsForChecklist(checklistId: string): Promise<Dropdown[]> {
+  // Get top-level dropdowns
+  const { data: dropdowns, error } = await supabase
+    .from('dropdowns')
+    .select('*')
+    .eq('checklist_id', checklistId)
+    .is('parent_dropdown_id', null);
+
+  if (error) return [];
+
+  // For each dropdown, get all tasks and nested dropdowns
+  const dropdownsWithTasksAndNested = await Promise.all(
+    dropdowns.map((dropdown) => getDropdownWithTasksAndNested(dropdown))
+  );
+
+  return dropdownsWithTasksAndNested;
 }
 
 export async function createChecklist(checklist: Omit<Checklist, 'id'>): Promise<Checklist | null> {
@@ -170,7 +211,8 @@ export async function getChecklistById(id: string): Promise<Checklist | null> {
     .from('dropdowns')
     .select('*')
     .eq('checklist_id', data.id)
-    .is('parent_dropdown_id', null);
+    .is('parent_dropdown_id', null)
+    .order('position', { ascending: true });
   
   if (dropdownsError || !dropdownsData) return null;
   
@@ -295,42 +337,33 @@ export async function toggleDropdownExpanded(id: string, expanded: boolean): Pro
 }
 
 // Task functions
-export async function createTask(dropdownId: string, task: Omit<Task, 'id'>): Promise<Task | null> {
+export async function createTask(
+  dropdownId: string,
+  task: Omit<Task, 'id'>
+): Promise<Task | null> {
   const { data, error } = await supabase
     .from('tasks')
     .insert([{
       title: task.title,
-      completed: task.completed, // Keep for backward compatibility
-      default_completed: task.completed, // Set default completion status
-      content_subheader: task.content.subheader,
-      content_text: task.content.content,
-      dropdown_id: dropdownId
+      completed: task.completed || false,
+      dropdown_id: dropdownId,
+      // Add default values for content fields
+      content_subheader: task.content?.subheader || task.title || '',
+      content_text: task.content?.content || ''
     }])
     .select()
     .single();
-  
+
   if (error || !data) return null;
-  
-  // Get the current user
-  const { data: userData } = await supabase.auth.getUser();
-  if (userData.user) {
-    // Create a user-specific completion record if user is logged in
-    await supabase
-      .from('user_task_completions')
-      .insert([{
-        user_id: userData.user.id,
-        task_id: data.id,
-        completed: task.completed
-      }]);
-  }
-  
+
   return {
     id: data.id,
     title: data.title,
-    completed: task.completed,
+    completed: data.completed,
+    // Add content to match Task interface
     content: {
-      subheader: data.content_subheader,
-      content: data.content_text
+      subheader: data.content_subheader || data.title || '',
+      content: data.content_text || ''
     }
   };
 }
@@ -449,4 +482,344 @@ export async function toggleTaskCompletion(id: string, completed: boolean): Prom
     
     return !error;
   }
+}
+
+// Add new functions for updating positions
+export async function updateDropdownPositions(dropdowns: Dropdown[]): Promise<boolean> {
+  try {
+    // Prepare batch updates
+    const updates = dropdowns.map(dropdown => ({
+      id: dropdown.id,
+      position: dropdown.position || 0
+    }));
+    
+    // Try batch update first
+    const { error } = await supabase
+      .from('dropdowns')
+      .upsert(updates, { onConflict: 'id' });
+    
+    // If batch update succeeds, return true
+    if (!error) return true;
+    
+    // If batch update fails due to permissions, try individual updates
+    console.warn('Batch update failed, falling back to individual updates:', error.message);
+    
+    // Fallback: update each dropdown individually
+    let allSuccessful = true;
+    for (const dropdown of updates) {
+      const { error: individualError } = await supabase
+        .from('dropdowns')
+        .update({ position: dropdown.position })
+        .eq('id', dropdown.id);
+      
+      if (individualError) {
+        console.error(`Failed to update dropdown ${dropdown.id}:`, individualError);
+        allSuccessful = false;
+      }
+    }
+    
+    return allSuccessful;
+  } catch (err) {
+    console.error('Error updating dropdown positions:', err);
+    return false;
+  }
+}
+
+export async function updateTaskPositions(tasks: Task[]): Promise<boolean> {
+  try {
+    // Prepare batch updates
+    const updates = tasks.map(task => ({
+      id: task.id,
+      position: task.position || 0
+    }));
+    
+    // Try batch update first
+    const { error } = await supabase
+      .from('tasks')
+      .upsert(updates, { onConflict: 'id' });
+    
+    // If batch update succeeds, return true
+    if (!error) return true;
+    
+    // If batch update fails due to permissions, try individual updates
+    console.warn('Batch update failed, falling back to individual updates:', error.message);
+    
+    // Fallback: update each task individually
+    let allSuccessful = true;
+    for (const task of updates) {
+      const { error: individualError } = await supabase
+        .from('tasks')
+        .update({ position: task.position })
+        .eq('id', task.id);
+      
+      if (individualError) {
+        console.error(`Failed to update task ${task.id}:`, individualError);
+        allSuccessful = false;
+      }
+    }
+    
+    return allSuccessful;
+  } catch (err) {
+    console.error('Error updating task positions:', err);
+    return false;
+  }
+}
+
+// Learning Pages functions
+export async function getAllLearningPages(): Promise<LearningPage[]> {
+  const { data, error } = await supabase
+    .from('learning_pages')
+    .select(`
+      *,
+      author:created_by(id, email, role)
+    `)
+    .order('title');
+  
+  if (error || !data) return [];
+  
+  return data.map(page => ({
+    ...page,
+    author: page.author ? {
+      id: page.author.id,
+      email: page.author.email,
+      role: page.author.role as 'admin' | 'user'
+    } : undefined
+  }));
+}
+
+export async function getLearningPageById(id: string): Promise<LearningPage | null> {
+  const { data, error } = await supabase
+    .from('learning_pages')
+    .select(`
+      *,
+      author:created_by(id, email, role)
+    `)
+    .eq('id', id)
+    .single();
+  
+  if (error || !data) return null;
+  
+  return {
+    ...data,
+    author: data.author ? {
+      id: data.author.id,
+      email: data.author.email,
+      role: data.author.role as 'admin' | 'user'
+    } : undefined
+  };
+}
+
+export async function createLearningPage(page: Omit<LearningPage, 'id' | 'created_at' | 'updated_at'>): Promise<LearningPage | null> {
+  // Check if user is admin
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) return null;
+  
+  const { data: userRole } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', userData.user.id)
+    .single();
+  
+  if (userRole?.role !== 'admin') {
+    return null; // Only admins can create learning pages
+  }
+  
+  // Create the learning page
+  const { data, error } = await supabase
+    .from('learning_pages')
+    .insert([{
+      title: page.title,
+      content: page.content,
+      created_by: userData.user.id
+    }])
+    .select()
+    .single();
+  
+  if (error || !data) return null;
+  
+  return {
+    id: data.id,
+    title: data.title,
+    content: data.content,
+    created_by: data.created_by,
+    created_at: data.created_at,
+    updated_at: data.updated_at
+  };
+}
+
+export async function updateLearningPage(page: LearningPage): Promise<LearningPage | null> {
+  // Check if user is admin
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) return null;
+  
+  const { data: userRole } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', userData.user.id)
+    .single();
+  
+  if (userRole?.role !== 'admin') {
+    return null; // Only admins can update learning pages
+  }
+  
+  // Update the learning page
+  const { data, error } = await supabase
+    .from('learning_pages')
+    .update({
+      title: page.title,
+      content: page.content,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', page.id)
+    .select()
+    .single();
+  
+  if (error || !data) return null;
+  
+  return {
+    id: data.id,
+    title: data.title,
+    content: data.content,
+    created_by: data.created_by,
+    created_at: data.created_at,
+    updated_at: data.updated_at
+  };
+}
+
+export async function deleteLearningPage(id: string): Promise<boolean> {
+  // Check if user is admin
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) return false;
+  
+  const { data: userRole } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', userData.user.id)
+    .single();
+  
+  if (userRole?.role !== 'admin') {
+    return false; // Only admins can delete learning pages
+  }
+  
+  // Delete the learning page
+  const { error } = await supabase
+    .from('learning_pages')
+    .delete()
+    .eq('id', id);
+  
+  return !error;
+}
+
+// Task Learning Pages junction functions
+export async function getLearningPagesForTask(taskId: string): Promise<LearningPage[]> {
+  const { data, error } = await supabase
+    .from('task_learning_pages')
+    .select(`
+      learning_page_id,
+      learning_page:learning_page_id(
+        id, 
+        title, 
+        content, 
+        created_by, 
+        created_at, 
+        updated_at,
+        author:created_by(id, email, role)
+      )
+    `)
+    .eq('task_id', taskId);
+  
+  if (error || !data) return [];
+  
+  return data.map(item => ({
+    id: item.learning_page.id,
+    title: item.learning_page.title,
+    content: item.learning_page.content,
+    created_by: item.learning_page.created_by,
+    created_at: item.learning_page.created_at,
+    updated_at: item.learning_page.updated_at,
+    author: item.learning_page.author ? {
+      id: item.learning_page.author.id,
+      email: item.learning_page.author.email,
+      role: item.learning_page.author.role as 'admin' | 'user'
+    } : undefined
+  }));
+}
+
+export async function getTasksForLearningPage(learningPageId: string): Promise<Task[]> {
+  const { data, error } = await supabase
+    .from('task_learning_pages')
+    .select(`
+      task_id,
+      task:task_id(
+        id, 
+        title, 
+        completed, 
+        content_subheader, 
+        content_text
+      )
+    `)
+    .eq('learning_page_id', learningPageId);
+  
+  if (error || !data) return [];
+  
+  return data.map(item => ({
+    id: item.task.id,
+    title: item.task.title,
+    completed: item.task.completed,
+    content: {
+      subheader: item.task.content_subheader,
+      content: item.task.content_text
+    }
+  }));
+}
+
+export async function assignLearningPageToTask(taskId: string, learningPageId: string): Promise<boolean> {
+  // Check if user is admin
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) return false;
+  
+  const { data: userRole } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', userData.user.id)
+    .single();
+  
+  if (userRole?.role !== 'admin') {
+    return false; // Only admins can assign learning pages to tasks
+  }
+  
+  // Create the assignment
+  const { error } = await supabase
+    .from('task_learning_pages')
+    .insert([{
+      task_id: taskId,
+      learning_page_id: learningPageId
+    }]);
+  
+  return !error;
+}
+
+export async function removeLearningPageFromTask(taskId: string, learningPageId: string): Promise<boolean> {
+  // Check if user is admin
+  const { data: userData } = await supabase.auth.getUser();
+  if (!userData.user) return false;
+  
+  const { data: userRole } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', userData.user.id)
+    .single();
+  
+  if (userRole?.role !== 'admin') {
+    return false; // Only admins can remove learning pages from tasks
+  }
+  
+  // Delete the assignment
+  const { error } = await supabase
+    .from('task_learning_pages')
+    .delete()
+    .eq('task_id', taskId)
+    .eq('learning_page_id', learningPageId);
+  
+  return !error;
 } 

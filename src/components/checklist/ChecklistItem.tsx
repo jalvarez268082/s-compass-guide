@@ -1,10 +1,10 @@
-
 import React from 'react';
 import { Task } from '@/types';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
-import { Info, Edit, Trash2 } from 'lucide-react';
+import { Info, Edit, Trash2, GripVertical } from 'lucide-react';
 import { useStore } from '@/store/useStore';
+import { useDragDrop } from './DragDropContext';
 
 interface ChecklistItemProps {
   task: Task;
@@ -24,6 +24,7 @@ const ChecklistItem: React.FC<ChecklistItemProps> = ({
   onEditItem,
 }) => {
   const { toggleTaskCompletion, deleteTask, isAdminEditMode } = useStore();
+  const { handleDragStart, handleDragEnd, handleDragOver, handleDrop } = useDragDrop();
 
   const handleTaskToggle = () => {
     toggleTaskCompletion(checklistId, dropdownId, task.id);
@@ -37,9 +38,26 @@ const ChecklistItem: React.FC<ChecklistItemProps> = ({
     onEditItem(task.id, 'task');
   };
 
+  const draggableTask = {
+    ...task,
+    dropdown_id: dropdownId 
+  };
+
   return (
-    <div className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md">
+    <div 
+      className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md"
+      draggable={isAdminEditMode}
+      onDragStart={(e) => isAdminEditMode && handleDragStart(e, { type: 'task', item: draggableTask })}
+      onDragEnd={(e) => isAdminEditMode && handleDragEnd(e)}
+      onDragOver={(e) => isAdminEditMode && handleDragOver(e)}
+      onDrop={(e) => isAdminEditMode && handleDrop(e, { type: 'task', item: draggableTask })}
+    >
       <div className="flex items-center gap-3 flex-1">
+        {isAdminEditMode && (
+          <div className="cursor-grab hover:cursor-grabbing p-1">
+            <GripVertical className="h-4 w-4 text-gray-400" />
+          </div>
+        )}
         <Checkbox
           id={`task-${task.id}`}
           checked={task.completed}
@@ -55,7 +73,7 @@ const ChecklistItem: React.FC<ChecklistItemProps> = ({
         </label>
       </div>
       
-      <div className="flex items-center gap-1">
+      <div className="flex items-center">
         <Button
           variant="ghost"
           size="icon"

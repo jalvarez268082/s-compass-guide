@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import LinkExtension from '@tiptap/extension-link';
 import UnderlineExtension from '@tiptap/extension-underline';
 import TextStyle from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
+import TaskLinkExtension from '@/extensions/TaskLinkExtension';
 import { Toggle } from '@/components/ui/toggle';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -25,7 +26,8 @@ import {
   Underline as UnderlineIcon,
   Quote,
   Code,
-  Palette
+  Palette,
+  FilePlus
 } from 'lucide-react';
 import { 
   DropdownMenu,
@@ -35,6 +37,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useStore } from '@/store/useStore';
+import { Task } from '@/types';
+import { processTaskLinks } from '@/lib/task-utils';
 
 interface RichTextEditorProps {
   value: string;
@@ -60,6 +65,12 @@ const COLORS = [
 const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange }) => {
   const [mode, setMode] = useState<'write' | 'preview'>('write');
   const [selectedColor, setSelectedColor] = useState<string>('inherit');
+  const { allTasks } = useStore();
+
+  // Process the content for preview
+  const processedContent = useMemo(() => {
+    return processTaskLinks(value);
+  }, [value]);
 
   const editor = useEditor({
     extensions: [
@@ -70,6 +81,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange }) => {
       UnderlineExtension,
       TextStyle,
       Color,
+      TaskLinkExtension,
     ],
     content: value,
     onUpdate: ({ editor }) => {
@@ -88,6 +100,12 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange }) => {
   const setColor = (color: string) => {
     editor?.chain().focus().setColor(color).run();
     setSelectedColor(color);
+  };
+
+  // Function to insert task link
+  const insertTaskLink = (task: Task) => {
+    const taskLink = `[[task:${task.id}|${task.title}]]`;
+    editor?.chain().focus().insertContent(taskLink).run();
   };
 
   if (!editor) {
@@ -253,6 +271,31 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange }) => {
                 <LinkIcon className="h-4 w-4" />
               </Toggle>
 
+              {/* Task Link Dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="p-1 h-8 w-8"
+                    aria-label="Task Link"
+                  >
+                    <FilePlus className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="max-h-56 overflow-y-auto">
+                  {allTasks.map((task) => (
+                    <DropdownMenuItem 
+                      key={task.id}
+                      onClick={() => insertTaskLink(task)}
+                      className="flex items-center gap-2"
+                    >
+                      <span>{task.title}</span>
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               <div className="flex gap-0.5 ml-1">
                 <Button 
                   variant="ghost" 
@@ -289,7 +332,7 @@ const RichTextEditor: React.FC<RichTextEditorProps> = ({ value, onChange }) => {
         <TabsContent value="preview" className="mt-0">
           <div 
             className="p-4 min-h-[200px] max-h-[400px] overflow-y-auto prose prose-sm"
-            dangerouslySetInnerHTML={{ __html: value }}
+            dangerouslySetInnerHTML={{ __html: processedContent }}
           />
         </TabsContent>
       </Tabs>

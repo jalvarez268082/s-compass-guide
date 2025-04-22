@@ -133,10 +133,30 @@ export async function signOut(): Promise<{ error: string | null }> {
 }
 
 /**
+ * Check if there's a valid session
+ */
+export async function hasValidSession(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    return !error && data.session !== null;
+  } catch (err) {
+    console.error('Error checking session:', err);
+    return false;
+  }
+}
+
+/**
  * Get the current authenticated user with role information
  */
 export async function getCurrentUser(): Promise<{ user: User | null; error: string | null }> {
   try {
+    // Check if we have a valid session first
+    const hasSession = await hasValidSession();
+    if (!hasSession) {
+      console.log('No valid session found');
+      return { user: null, error: null }; // Not an error, just no session
+    }
+    
     const { data: authData, error: authError } = await supabase.auth.getUser();
 
     if (authError) {
@@ -152,11 +172,15 @@ export async function getCurrentUser(): Promise<{ user: User | null; error: stri
       .from('users')
       .select('*')
       .eq('id', authData.user.id)
-      .single();
+      .maybeSingle();
 
-    if (userError) {
-      // If the profile doesn't exist, create it now
-      if (userError.code === 'PGRST116') {
+    if (userError && userError.code !== 'PGRST116') {
+      return { user: null, error: userError.message };
+    }
+
+    // If no user record found, create one
+    if (!userData) {
+      try {
         // Create the user profile
         const { data: newUserData, error: insertError } = await supabase
           .from('users')
@@ -183,9 +207,10 @@ export async function getCurrentUser(): Promise<{ user: User | null; error: stri
           },
           error: null,
         };
+      } catch (insertErr) {
+        console.error('Error during user insertion:', insertErr);
+        return { user: null, error: 'Failed to create user profile' };
       }
-
-      return { user: null, error: userError.message };
     }
 
     // Return the user with the appropriate role

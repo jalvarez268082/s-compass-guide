@@ -62,6 +62,7 @@ export type Database = {
           checklist_id: string
           parent_dropdown_id: string | null
           expanded: boolean
+          position: number
           created_at: string
           updated_at: string
         }
@@ -71,6 +72,7 @@ export type Database = {
           checklist_id: string
           parent_dropdown_id?: string | null
           expanded?: boolean
+          position?: number
           created_at?: string
           updated_at?: string
         }
@@ -80,8 +82,55 @@ export type Database = {
           checklist_id?: string
           parent_dropdown_id?: string | null
           expanded?: boolean
+          position?: number
           created_at?: string
           updated_at?: string
+        }
+      }
+      learning_pages: {
+        Row: {
+          id: string
+          title: string
+          content: string
+          created_by: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          title: string
+          content: string
+          created_by: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          title?: string
+          content?: string
+          created_by?: string
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      task_learning_pages: {
+        Row: {
+          id: string
+          task_id: string
+          learning_page_id: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          task_id: string
+          learning_page_id: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          task_id?: string
+          learning_page_id?: string
+          created_at?: string
         }
       }
       tasks: {
@@ -92,6 +141,7 @@ export type Database = {
           content_subheader: string
           content_text: string
           dropdown_id: string
+          position: number
           created_at: string
           updated_at: string
           default_completed: boolean
@@ -103,6 +153,7 @@ export type Database = {
           content_subheader: string
           content_text: string
           dropdown_id: string
+          position?: number
           created_at?: string
           updated_at?: string
           default_completed?: boolean
@@ -114,6 +165,7 @@ export type Database = {
           content_subheader?: string
           content_text?: string
           dropdown_id?: string
+          position?: number
           created_at?: string
           updated_at?: string
           default_completed?: boolean

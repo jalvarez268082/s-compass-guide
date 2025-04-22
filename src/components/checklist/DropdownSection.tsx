@@ -1,11 +1,11 @@
-
 import React from 'react';
 import { Dropdown, Task } from '@/types';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronRight, Plus, Edit, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Edit, Trash2, GripVertical } from 'lucide-react';
 import ChecklistItem from './ChecklistItem';
 import { useStore } from '@/store/useStore';
+import { useDragDrop } from './DragDropContext';
 
 interface DropdownSectionProps {
   dropdown: Dropdown;
@@ -25,20 +25,24 @@ const DropdownSection: React.FC<DropdownSectionProps> = ({
   onAddItem
 }) => {
   const { toggleDropdown, deleteDropdown, isAdminEditMode } = useStore();
+  const { handleDragStart, handleDragEnd, handleDragOver, handleDrop } = useDragDrop();
 
   const handleToggle = () => {
     toggleDropdown(checklistId, dropdown.id);
   };
 
-  const handleEdit = () => {
+  const handleEdit = (e: React.MouseEvent) => {
+    e.stopPropagation();
     onEditItem(dropdown.id, 'dropdown');
   };
 
-  const handleDelete = () => {
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation();
     deleteDropdown(checklistId, dropdown.id, parentDropdownId);
   };
 
-  const handleAddTask = () => {
+  const handleAddTask = (e: React.MouseEvent) => {
+    e.stopPropagation();
     onAddItem('task', dropdown.id);
   };
 
@@ -46,32 +50,47 @@ const DropdownSection: React.FC<DropdownSectionProps> = ({
     onAddItem('dropdown', dropdown.id);
   };
 
+  const draggableDropdown = {
+    ...dropdown,
+    checklist_id: checklistId,
+    parent_dropdown_id: parentDropdownId || null
+  };
+
   return (
     <Collapsible
       open={dropdown.expanded}
       onOpenChange={handleToggle}
       className="border rounded-md mb-3"
+      draggable={isAdminEditMode}
+      onDragStart={(e) => isAdminEditMode && handleDragStart(e, { type: 'dropdown', item: draggableDropdown })}
+      onDragEnd={(e) => isAdminEditMode && handleDragEnd(e)}
+      onDragOver={(e) => isAdminEditMode && handleDragOver(e)}
+      onDrop={(e) => isAdminEditMode && handleDrop(e, { type: 'dropdown', item: draggableDropdown })}
     >
-      <div className="bg-gray-50 px-4 py-2 flex items-center justify-between">
+      <div className="flex items-center justify-between p-4 hover:bg-gray-50">
         <CollapsibleTrigger asChild>
-          <Button variant="ghost" className="p-0 hover:bg-transparent">
-            <div className="flex items-center space-x-2">
-              {dropdown.expanded ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-              <h3 className="text-base font-medium">{dropdown.title}</h3>
-            </div>
-          </Button>
+          <div className="flex items-center flex-1 cursor-pointer">
+            {isAdminEditMode && (
+              <div className="cursor-grab hover:cursor-grabbing pr-2">
+                <GripVertical className="h-4 w-4 text-gray-400" />
+              </div>
+            )}
+            {dropdown.expanded ? (
+              <ChevronDown className="h-4 w-4 text-gray-500 mr-2" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-gray-500 mr-2" />
+            )}
+            <span className="text-sm font-medium">{dropdown.title}</span>
+          </div>
         </CollapsibleTrigger>
         
+        {/* Admin controls - separate from the trigger */}
         {isAdminEditMode && (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center space-x-1 ml-2">
             <Button
               variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-500 hover:text-green-600"
+              size="sm"
+              className="h-8 w-8 p-0"
               onClick={handleAddTask}
             >
               <Plus className="h-4 w-4" />
@@ -79,8 +98,8 @@ const DropdownSection: React.FC<DropdownSectionProps> = ({
             
             <Button
               variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-500 hover:text-amber-600"
+              size="sm"
+              className="h-8 w-8 p-0"
               onClick={handleEdit}
             >
               <Edit className="h-4 w-4" />
@@ -88,8 +107,8 @@ const DropdownSection: React.FC<DropdownSectionProps> = ({
             
             <Button
               variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-gray-500 hover:text-red-600"
+              size="sm"
+              className="h-8 w-8 p-0"
               onClick={handleDelete}
             >
               <Trash2 className="h-4 w-4" />

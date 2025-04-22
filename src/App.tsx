@@ -7,6 +7,9 @@ import { StoreProvider, useStore } from "./store/useStore";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
+import TestTaskLinks from './pages/test-task-links';
+import LearningPages from './pages/LearningPages';
+import LearningPageView from './pages/LearningPageView';
 
 const queryClient = new QueryClient();
 
@@ -46,6 +49,13 @@ const AppRoutes = () => {
                 <Index />
               </ProtectedRoute>
             } />
+            
+            {/* Test pages */}
+            <Route path="/test/task-links" element={<TestTaskLinks />} />
+            
+            {/* Learning pages */}
+            <Route path="/learning" element={<LearningPages />} />
+            <Route path="/learning/:id" element={<LearningPageView />} />
             
             {/* Catch-all route */}
             <Route path="*" element={<NotFound />} />
